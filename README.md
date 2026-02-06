@@ -50,10 +50,10 @@ Fees are taken on input: if fee is `f`, only `(1-f)` of the input affects reserv
 
 ### Arbitrage
 
-When spot price diverges from fair price `p`, arbitrageurs trade to close the gap. For fee `f`:
+When spot price diverges from fair price `p`, arbitrageurs trade to close the gap. For fee `f` (fee-on-input), let `γ = 1 - f`:
 
-- **Spot < fair** (AMM underprices X): Buy X from AMM. Optimal size: `Δx = x - √(k(1+f)/p)`
-- **Spot > fair** (AMM overprices X): Sell X to AMM. Optimal size: `Δx = √(k(1-f)/p) - x`
+- **Spot < fair** (AMM underprices X): Buy X from AMM. Optimal size: `Δx = x - √(k/(γ·p))`
+- **Spot > fair** (AMM overprices X): Sell X to AMM. Optimal size: `Δx_in = (√(k·γ/p) - x) / γ`
 
 Higher fees mean arbitrageurs need larger mispricings to profit, so your AMM stays "stale" longer—bad for edge.
 

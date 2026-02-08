@@ -92,6 +92,8 @@ The normalizer also means there's no "free lunch"—you can't beat 30 bps just b
 
 **Start with `contracts/src/StarterStrategy.sol`** — a simple 50 bps fixed-fee strategy. Copy it, rename `getName()`, and modify the fee logic.
 
+For multi-asset experiments, use `contracts/src/StarterStrategyV2.sol` with `IAMMStrategyV2` / `AMMStrategyBaseV2`.
+
 ```solidity
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.24;
@@ -181,8 +183,38 @@ amm-match run my_strategy.sol
 # Quick test
 amm-match run my_strategy.sol --simulations 10
 
+# Multi-asset mode (N assets, many 2-token pools)
+amm-match run-v2 my_strategy.sol --config v2_config.json
+
 # Validate without running
 amm-match validate my_strategy.sol
+
+# CI-friendly V2 runtime smoke check
+python scripts/check_v2_smoke.py
+```
+
+Example `v2_config.json`:
+
+```json
+{
+  "n_simulations": 50,
+  "n_steps": 1000,
+  "initial_prices": [1.0, 100.0, 150.0],
+  "numeraire_token": 0,
+  "gbm_mu": 0.0,
+  "gbm_sigma": 0.001,
+  "gbm_dt": 1.0,
+  "retail_arrival_rate": 0.8,
+  "retail_mean_size": 20.0,
+  "retail_size_sigma": 1.2,
+  "retail_buy_prob": 0.5,
+  "seed": 42,
+  "pools": [
+    {"token_a": 0, "token_b": 1, "initial_a": 10000.0, "initial_b": 100.0},
+    {"token_a": 0, "token_b": 2, "initial_a": 10000.0, "initial_b": 66.6667},
+    {"token_a": 1, "token_b": 2, "initial_a": 100.0, "initial_b": 66.6667}
+  ]
+}
 ```
 
 Output is your average edge across simulations. The 30 bps normalizer typically scores around 250-350 edge depending on market conditions.

@@ -53,11 +53,13 @@ impl RetailTrader {
         };
 
         // Create distributions, handling edge cases
-        let poisson = Poisson::new(arrival_rate.max(0.01)).unwrap_or_else(|_| Poisson::new(1.0).unwrap());
+        let poisson =
+            Poisson::new(arrival_rate.max(0.01)).unwrap_or_else(|_| Poisson::new(1.0).unwrap());
         let mean = mean_size.max(0.01);
         let sigma = size_sigma.max(0.01);
         let mu = mean.ln() - 0.5 * sigma * sigma;
-        let lognormal = LogNormal::new(mu, sigma).unwrap_or_else(|_| LogNormal::new(0.0, 1.0).unwrap());
+        let lognormal =
+            LogNormal::new(mu, sigma).unwrap_or_else(|_| LogNormal::new(0.0, 1.0).unwrap());
 
         Self {
             arrival_rate,

@@ -19,6 +19,20 @@ pub struct TradeInfo {
     pub reserve_y: Wad,
 }
 
+/// Information about an executed trade for V2 callbacks.
+#[derive(Debug, Clone, Copy)]
+pub struct TradeInfoV2 {
+    pub is_buy: bool,
+    pub amount_a: Wad,
+    pub amount_b: Wad,
+    pub timestamp: u64,
+    pub reserve_a: Wad,
+    pub reserve_b: Wad,
+    pub pool_id: u64,
+    pub token_a: u64,
+    pub token_b: u64,
+}
+
 impl TradeInfo {
     /// Create a new TradeInfo.
     pub fn new(
@@ -61,27 +75,53 @@ impl TradeInfo {
         }
 
         // amountX
-        Self::encode_u256(&mut buffer[36..68], self.amount_x.raw() as u128);
+        encode_u256(&mut buffer[36..68], self.amount_x.raw() as u128);
 
         // amountY
-        Self::encode_u256(&mut buffer[68..100], self.amount_y.raw() as u128);
+        encode_u256(&mut buffer[68..100], self.amount_y.raw() as u128);
 
         // timestamp
-        Self::encode_u256(&mut buffer[100..132], self.timestamp as u128);
+        encode_u256(&mut buffer[100..132], self.timestamp as u128);
 
         // reserveX
-        Self::encode_u256(&mut buffer[132..164], self.reserve_x.raw() as u128);
+        encode_u256(&mut buffer[132..164], self.reserve_x.raw() as u128);
 
         // reserveY
-        Self::encode_u256(&mut buffer[164..196], self.reserve_y.raw() as u128);
+        encode_u256(&mut buffer[164..196], self.reserve_y.raw() as u128);
     }
+}
 
-    /// Encode a u128 as big-endian 32 bytes.
+impl TradeInfoV2 {
+    /// Encode as ABI calldata for afterSwapV2 function.
+    ///
+    /// Layout (292 bytes total):
+    /// - bytes 0-3: function selector (0x7bca99a5)
+    /// - bytes 4-35: isBuy
+    /// - bytes 36-67: amountA
+    /// - bytes 68-99: amountB
+    /// - bytes 100-131: timestamp
+    /// - bytes 132-163: reserveA
+    /// - bytes 164-195: reserveB
+    /// - bytes 196-227: poolId
+    /// - bytes 228-259: tokenA
+    /// - bytes 260-291: tokenB
     #[inline]
-    fn encode_u256(buffer: &mut [u8], value: u128) {
-        buffer.fill(0);
-        let bytes = value.to_be_bytes();
-        buffer[16..32].copy_from_slice(&bytes);
+    pub fn encode_calldata(&self, buffer: &mut [u8; 292]) {
+        buffer[0..4].copy_from_slice(&SELECTOR_AFTER_SWAP_V2);
+
+        buffer[4..36].fill(0);
+        if self.is_buy {
+            buffer[35] = 1;
+        }
+
+        encode_u256(&mut buffer[36..68], self.amount_a.raw() as u128);
+        encode_u256(&mut buffer[68..100], self.amount_b.raw() as u128);
+        encode_u256(&mut buffer[100..132], self.timestamp as u128);
+        encode_u256(&mut buffer[132..164], self.reserve_a.raw() as u128);
+        encode_u256(&mut buffer[164..196], self.reserve_b.raw() as u128);
+        encode_u256(&mut buffer[196..228], self.pool_id as u128);
+        encode_u256(&mut buffer[228..260], self.token_a as u128);
+        encode_u256(&mut buffer[260..292], self.token_b as u128);
     }
 }
 
@@ -90,6 +130,12 @@ pub const SELECTOR_AFTER_INITIALIZE: [u8; 4] = [0x83, 0x7a, 0xef, 0x47];
 
 /// Function selector for afterSwap(TradeInfo)
 pub const SELECTOR_AFTER_SWAP: [u8; 4] = [0xc2, 0xba, 0xbb, 0x57];
+
+/// Function selector for afterInitializeV2(uint256,uint256,uint256,uint256,uint256)
+pub const SELECTOR_AFTER_INITIALIZE_V2: [u8; 4] = [0x1a, 0xfe, 0xf3, 0x59];
+
+/// Function selector for afterSwapV2(TradeInfoV2)
+pub const SELECTOR_AFTER_SWAP_V2: [u8; 4] = [0x7b, 0xca, 0x99, 0xa5];
 
 /// Function selector for getName()
 pub const SELECTOR_GET_NAME: [u8; 4] = [0x17, 0xd7, 0xde, 0x7c];
@@ -108,6 +154,25 @@ pub fn encode_after_initialize(initial_x: Wad, initial_y: Wad) -> [u8; 68] {
     let y_bytes = (initial_y.raw() as u128).to_be_bytes();
     buffer[52..68].copy_from_slice(&y_bytes);
 
+    buffer
+}
+
+/// Encode afterInitializeV2(uint256,uint256,uint256,uint256,uint256) calldata.
+#[inline]
+pub fn encode_after_initialize_v2(
+    initial_a: Wad,
+    initial_b: Wad,
+    pool_id: u64,
+    token_a: u64,
+    token_b: u64,
+) -> [u8; 164] {
+    let mut buffer = [0u8; 164];
+    buffer[0..4].copy_from_slice(&SELECTOR_AFTER_INITIALIZE_V2);
+    encode_u256(&mut buffer[4..36], initial_a.raw() as u128);
+    encode_u256(&mut buffer[36..68], initial_b.raw() as u128);
+    encode_u256(&mut buffer[68..100], pool_id as u128);
+    encode_u256(&mut buffer[100..132], token_a as u128);
+    encode_u256(&mut buffer[132..164], token_b as u128);
     buffer
 }
 
@@ -146,16 +211,24 @@ fn decode_u256(data: &[u8]) -> Option<u128> {
     Some(u128::from_be_bytes(bytes))
 }
 
+/// Encode a u128 as big-endian 32 bytes.
+#[inline]
+fn encode_u256(buffer: &mut [u8], value: u128) {
+    buffer.fill(0);
+    let bytes = value.to_be_bytes();
+    buffer[16..32].copy_from_slice(&bytes);
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::types::wad::{WAD, MAX_FEE};
+    use crate::types::wad::{MAX_FEE, WAD};
 
     #[test]
     fn test_encode_trade_info() {
         let trade = TradeInfo {
             is_buy: true,
-            amount_x: Wad::new(WAD), // 1.0
+            amount_x: Wad::new(WAD),     // 1.0
             amount_y: Wad::new(WAD * 2), // 2.0
             timestamp: 100,
             reserve_x: Wad::new(WAD * 1000),
@@ -178,10 +251,7 @@ mod tests {
 
     #[test]
     fn test_encode_after_initialize() {
-        let calldata = encode_after_initialize(
-            Wad::new(WAD * 1000),
-            Wad::new(WAD * 1000),
-        );
+        let calldata = encode_after_initialize(Wad::new(WAD * 1000), Wad::new(WAD * 1000));
 
         assert_eq!(&calldata[0..4], &SELECTOR_AFTER_INITIALIZE);
         assert_eq!(calldata.len(), 68);
@@ -200,5 +270,34 @@ mod tests {
         data[48..64].copy_from_slice(&ok.to_be_bytes());
 
         assert!(decode_fee_pair(&data).is_none());
+    }
+
+    #[test]
+    fn test_encode_after_initialize_v2() {
+        let calldata =
+            encode_after_initialize_v2(Wad::new(WAD * 1000), Wad::new(WAD * 2000), 7, 1, 2);
+
+        assert_eq!(&calldata[0..4], &SELECTOR_AFTER_INITIALIZE_V2);
+        assert_eq!(calldata.len(), 164);
+    }
+
+    #[test]
+    fn test_encode_trade_info_v2() {
+        let trade = TradeInfoV2 {
+            is_buy: false,
+            amount_a: Wad::new(WAD),
+            amount_b: Wad::new(WAD * 2),
+            timestamp: 55,
+            reserve_a: Wad::new(WAD * 100),
+            reserve_b: Wad::new(WAD * 200),
+            pool_id: 3,
+            token_a: 0,
+            token_b: 2,
+        };
+
+        let mut buffer = [0u8; 292];
+        trade.encode_calldata(&mut buffer);
+        assert_eq!(&buffer[0..4], &SELECTOR_AFTER_SWAP_V2);
+        assert_eq!(buffer[35], 0);
     }
 }

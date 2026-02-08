@@ -58,7 +58,12 @@ class SolidityCompiler:
     def _load_base_contracts(self) -> dict[str, str]:
         """Load base contract sources from the contracts directory."""
         sources = {}
-        base_contracts = ["IAMMStrategy.sol", "AMMStrategyBase.sol"]
+        base_contracts = [
+            "IAMMStrategy.sol",
+            "AMMStrategyBase.sol",
+            "IAMMStrategyV2.sol",
+            "AMMStrategyBaseV2.sol",
+        ]
         for contract in base_contracts:
             src_file = self.CONTRACTS_DIR / "src" / contract
             if src_file.exists():

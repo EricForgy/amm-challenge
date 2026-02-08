@@ -32,7 +32,12 @@ impl Arbitrageur {
     }
 
     /// Find and execute the optimal arbitrage trade.
-    pub fn execute_arb(&self, amm: &mut CFMM, fair_price: f64, timestamp: u64) -> Option<ArbResult> {
+    pub fn execute_arb(
+        &self,
+        amm: &mut CFMM,
+        fair_price: f64,
+        timestamp: u64,
+    ) -> Option<ArbResult> {
         let (rx, ry) = amm.reserves();
         let spot_price = ry / rx;
 
@@ -51,7 +56,12 @@ impl Arbitrageur {
     ///
     /// Maximize profit = Δx * p - Y_paid
     /// Closed-form (fee-on-input): Δx_out = x - sqrt(k / (γ·p))
-    fn compute_buy_arb(&self, amm: &mut CFMM, fair_price: f64, timestamp: u64) -> Option<ArbResult> {
+    fn compute_buy_arb(
+        &self,
+        amm: &mut CFMM,
+        fair_price: f64,
+        timestamp: u64,
+    ) -> Option<ArbResult> {
         let (rx, ry) = amm.reserves();
         let k = rx * ry;
         let fee = amm.fees().ask_fee.to_f64();
@@ -101,7 +111,12 @@ impl Arbitrageur {
     ///
     /// Maximize profit = Y_received - Δx * p
     /// Closed-form (fee-on-input): Δx_in = (sqrt(k·γ / p) - x) / γ
-    fn compute_sell_arb(&self, amm: &mut CFMM, fair_price: f64, timestamp: u64) -> Option<ArbResult> {
+    fn compute_sell_arb(
+        &self,
+        amm: &mut CFMM,
+        fair_price: f64,
+        timestamp: u64,
+    ) -> Option<ArbResult> {
         let (rx, ry) = amm.reserves();
         let k = rx * ry;
         let fee = amm.fees().bid_fee.to_f64();
@@ -147,7 +162,12 @@ impl Arbitrageur {
     }
 
     /// Execute arbitrage on multiple AMMs.
-    pub fn arbitrage_all(&self, amms: &mut [CFMM], fair_price: f64, timestamp: u64) -> Vec<ArbResult> {
+    pub fn arbitrage_all(
+        &self,
+        amms: &mut [CFMM],
+        fair_price: f64,
+        timestamp: u64,
+    ) -> Vec<ArbResult> {
         amms.iter_mut()
             .filter_map(|amm| self.execute_arb(amm, fair_price, timestamp))
             .collect()
@@ -233,8 +253,10 @@ mod tests {
         let y_in_opt = quote_sell_x(rx, ry, fee, x_out_opt);
         let profit_opt = x_out_opt * fair_price - y_in_opt;
 
-        let profit_lo = (x_out_opt * 0.999) * fair_price - quote_sell_x(rx, ry, fee, x_out_opt * 0.999);
-        let profit_hi = (x_out_opt * 1.001) * fair_price - quote_sell_x(rx, ry, fee, x_out_opt * 1.001);
+        let profit_lo =
+            (x_out_opt * 0.999) * fair_price - quote_sell_x(rx, ry, fee, x_out_opt * 0.999);
+        let profit_hi =
+            (x_out_opt * 1.001) * fair_price - quote_sell_x(rx, ry, fee, x_out_opt * 1.001);
         assert!(profit_opt >= profit_lo - 1e-9);
         assert!(profit_opt >= profit_hi - 1e-9);
 

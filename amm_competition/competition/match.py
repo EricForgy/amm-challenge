@@ -7,22 +7,7 @@ from typing import Optional
 import amm_sim_rs
 
 from amm_competition.evm.adapter import EVMStrategyAdapter
-
-
-@dataclass
-class HyperparameterVariance:
-    """Configuration for hyperparameter variance across simulations."""
-    retail_mean_size_min: float
-    retail_mean_size_max: float
-    vary_retail_mean_size: bool
-
-    retail_arrival_rate_min: float
-    retail_arrival_rate_max: float
-    vary_retail_arrival_rate: bool
-
-    gbm_sigma_min: float
-    gbm_sigma_max: float
-    vary_gbm_sigma: bool
+from amm_competition.competition.types import HyperparameterVariance
 
 
 @dataclass
@@ -77,8 +62,57 @@ class MatchResult:
         return self.wins_a + self.wins_b + self.draws
 
 
+@dataclass
+class PoolStateV2:
+    """Pool reserves snapshot for multi-asset simulations."""
+    pool_id: int
+    token_a: int
+    token_b: int
+    reserve_a: float
+    reserve_b: float
+
+
+@dataclass
+class LightweightSimResultV2:
+    """Minimal simulation result for multi-asset mode."""
+    seed: int
+    strategies: list[str]
+    pnl: dict[str, Decimal]
+    edges: dict[str, Decimal]
+    final_prices: list[float]
+    pools: list[PoolStateV2]
+
+
+@dataclass
+class MatchResultV2:
+    """Result of a multi-asset head-to-head match."""
+    strategy_a: str
+    strategy_b: str
+    wins_a: int
+    wins_b: int
+    draws: int
+    total_pnl_a: Decimal
+    total_pnl_b: Decimal
+    total_edge_a: Decimal
+    total_edge_b: Decimal
+    simulation_results: list[LightweightSimResultV2] = field(default_factory=list)
+
+    @property
+    def winner(self) -> Optional[str]:
+        if self.wins_a > self.wins_b:
+            return self.strategy_a
+        elif self.wins_b > self.wins_a:
+            return self.strategy_b
+        return None
+
+    @property
+    def total_games(self) -> int:
+        return self.wins_a + self.wins_b + self.draws
+
+
 # Re-export SimulationConfig from Rust for compatibility
 SimulationConfig = amm_sim_rs.SimulationConfig
+SimulationConfigV2 = amm_sim_rs.SimulationConfigV2
 
 
 class MatchRunner:
@@ -218,6 +252,117 @@ class MatchRunner:
                 simulation_results.append(sim_result)
 
         return MatchResult(
+            strategy_a=name_a,
+            strategy_b=name_b,
+            wins_a=wins_a,
+            wins_b=wins_b,
+            draws=draws,
+            total_pnl_a=total_pnl_a,
+            total_pnl_b=total_pnl_b,
+            total_edge_a=total_edge_a,
+            total_edge_b=total_edge_b,
+            simulation_results=simulation_results,
+        )
+
+
+class MatchRunnerV2:
+    """Runs multi-asset matches using Rust simulation engine."""
+
+    def __init__(
+        self,
+        *,
+        configs: list[SimulationConfigV2],
+        n_workers: int,
+    ):
+        self.configs = configs
+        self.n_workers = n_workers
+
+    @classmethod
+    def from_legacy(
+        cls,
+        *,
+        n_simulations: int,
+        config: SimulationConfig,
+        n_workers: int,
+        variance: HyperparameterVariance,
+    ) -> "MatchRunnerV2":
+        """Build a V2 runner from legacy single-pair settings."""
+        from amm_competition.competition.config import build_v2_configs_from_legacy
+
+        configs = build_v2_configs_from_legacy(
+            base_config=config,
+            n_simulations=n_simulations,
+            variance=variance,
+        )
+        return cls(configs=configs, n_workers=n_workers)
+
+    def run_match(
+        self,
+        strategy_a: EVMStrategyAdapter,
+        strategy_b: EVMStrategyAdapter,
+        store_results: bool = False,
+    ) -> MatchResultV2:
+        """Run a complete multi-asset match between two strategies."""
+        name_a = strategy_a.get_name()
+        name_b = strategy_b.get_name()
+
+        batch_result = amm_sim_rs.run_batch_v2(
+            list(strategy_a._bytecode),
+            list(strategy_b._bytecode),
+            self.configs,
+            self.n_workers,
+        )
+
+        wins_a = 0
+        wins_b = 0
+        draws = 0
+        total_pnl_a = Decimal("0")
+        total_pnl_b = Decimal("0")
+        total_edge_a = Decimal("0")
+        total_edge_b = Decimal("0")
+        simulation_results = []
+
+        for rust_result in batch_result.results:
+            pnl_a = rust_result.pnl.get("submission", 0.0)
+            pnl_b = rust_result.pnl.get("normalizer", 0.0)
+            edge_a = rust_result.edges.get("submission", 0.0)
+            edge_b = rust_result.edges.get("normalizer", 0.0)
+
+            total_pnl_a += Decimal(str(pnl_a))
+            total_pnl_b += Decimal(str(pnl_b))
+            total_edge_a += Decimal(str(edge_a))
+            total_edge_b += Decimal(str(edge_b))
+
+            if edge_a > edge_b:
+                wins_a += 1
+            elif edge_b > edge_a:
+                wins_b += 1
+            else:
+                draws += 1
+
+            if store_results:
+                pools = [
+                    PoolStateV2(
+                        pool_id=p.pool_id,
+                        token_a=p.token_a,
+                        token_b=p.token_b,
+                        reserve_a=p.reserve_a,
+                        reserve_b=p.reserve_b,
+                    )
+                    for p in rust_result.pools
+                ]
+
+                sim_result = LightweightSimResultV2(
+                    seed=rust_result.seed,
+                    strategies=rust_result.strategies,
+                    pnl={k: Decimal(str(v)) for k, v in rust_result.pnl.items()},
+                    edges={k: Decimal(str(v)) for k, v in rust_result.edges.items()},
+                    final_prices=list(rust_result.final_prices),
+                    pools=pools,
+                )
+                simulation_results.append(sim_result)
+
+        return MatchResultV2(
             strategy_a=name_a,
             strategy_b=name_b,
             wins_a=wins_a,

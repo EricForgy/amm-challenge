@@ -18,6 +18,13 @@ import {AMMStrategyBase} from "./AMMStrategyBase.sol";
 import {IAMMStrategy, TradeInfo} from "./IAMMStrategy.sol";
 """
 
+BASE_IMPORTS_V2 = """// SPDX-License-Identifier: MIT
+pragma solidity ^0.8.24;
+
+import {AMMStrategyBaseV2} from "./AMMStrategyBaseV2.sol";
+import {IAMMStrategyV2, TradeInfoV2} from "./IAMMStrategyV2.sol";
+"""
+
 
 def _strategy_body(body: str) -> str:
     return (
@@ -40,6 +47,22 @@ def _minimal_functions() -> str:
 
     function getName() external pure override returns (string memory) {
         return "Secure";
+    }
+"""
+
+
+def _minimal_functions_v2() -> str:
+    return """
+    function afterInitializeV2(uint256, uint256, uint256, uint256, uint256) external override returns (uint256 bidFee, uint256 askFee) {
+        return (bpsToWad(30), bpsToWad(30));
+    }
+
+    function afterSwapV2(TradeInfoV2 calldata) external override returns (uint256 bidFee, uint256 askFee) {
+        return (bpsToWad(30), bpsToWad(30));
+    }
+
+    function getName() external pure override returns (string memory) {
+        return "SecureV2";
     }
 """
 
@@ -153,6 +176,37 @@ contract Strategy is AMMStrategyBase {
     assert result.valid
 
 
+def test_validator_accepts_v2_imports_and_callbacks() -> None:
+    source = (
+        BASE_IMPORTS_V2
+        + """
+contract Strategy is AMMStrategyBaseV2 {
+    function afterInitializeV2(uint256, uint256, uint256, uint256, uint256) external pure returns (uint256, uint256) { return (0, 0); }
+    function afterSwapV2(TradeInfoV2 calldata) external pure returns (uint256, uint256) { return (0, 0); }
+    function getName() external pure returns (string memory) { return "x"; }
+}
+"""
+    )
+    result = SolidityValidator().validate(source)
+    assert result.valid
+
+
+def test_validator_rejects_v2_missing_v2_callbacks() -> None:
+    source = (
+        BASE_IMPORTS_V2
+        + """
+contract Strategy is AMMStrategyBaseV2 {
+    function afterInitialize(uint256, uint256) external pure returns (uint256, uint256) { return (0, 0); }
+    function afterSwap(TradeInfoV2 calldata) external pure returns (uint256, uint256) { return (0, 0); }
+    function getName() external pure returns (string memory) { return "x"; }
+}
+"""
+    )
+    result = SolidityValidator().validate(source)
+    assert not result.valid
+    assert any("afterInitializeV2" in err or "afterSwapV2" in err for err in result.errors)
+
+
 def test_validator_rejects_reserved_name_redeclaration() -> None:
     source = (
         BASE_IMPORTS
@@ -227,6 +281,21 @@ def test_compiler_rejects_storage_outside_slots() -> None:
     result = SolidityCompiler().compile(source)
     assert not result.success
     assert any("storage outside" in err.lower() for err in (result.errors or []))
+
+
+def test_compiler_accepts_v2_strategy() -> None:
+    source = (
+        BASE_IMPORTS_V2
+        + """
+contract Strategy is AMMStrategyBaseV2 {
+"""
+        + _minimal_functions_v2()
+        + """
+}
+"""
+    )
+    result = SolidityCompiler().compile(source)
+    assert result.success, result.errors
 
 
 def test_rust_engine_rejects_out_of_range_fee_returns() -> None:

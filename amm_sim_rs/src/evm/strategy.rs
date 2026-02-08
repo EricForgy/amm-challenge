@@ -1,15 +1,15 @@
 //! EVM strategy wrapper using revm.
 
 use revm::{
-    primitives::{
-        Address, Bytes, ExecutionResult, Output, U256,
-        AccountInfo, Bytecode, TxKind,
-    },
+    primitives::{AccountInfo, Address, Bytecode, Bytes, ExecutionResult, Output, TxKind, U256},
     Evm, InMemoryDB,
 };
 use thiserror::Error;
 
-use crate::types::trade_info::{encode_after_initialize, decode_fee_pair, TradeInfo, SELECTOR_GET_NAME};
+use crate::types::trade_info::{
+    decode_fee_pair, encode_after_initialize, encode_after_initialize_v2, TradeInfo, TradeInfoV2,
+    SELECTOR_GET_NAME,
+};
 use crate::types::wad::Wad;
 
 /// Errors that can occur during EVM execution.
@@ -35,13 +35,13 @@ const GAS_LIMIT_NAME: u64 = 50_000;
 
 /// Fixed addresses for simulation.
 const STRATEGY_ADDRESS: Address = Address::new([
-    0x10, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01,
+    0x10, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x01,
 ]);
 
 const CALLER_ADDRESS: Address = Address::new([
-    0x20, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x02,
+    0x20, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x02,
 ]);
 
 /// EVM strategy executor.
@@ -56,6 +56,8 @@ pub struct EVMStrategy {
     db: InMemoryDB,
     /// Pre-allocated calldata buffer for after_swap (196 bytes)
     trade_calldata: [u8; 196],
+    /// Pre-allocated calldata buffer for after_swap_v2 (292 bytes)
+    trade_calldata_v2: [u8; 292],
 }
 
 impl EVMStrategy {
@@ -66,6 +68,7 @@ impl EVMStrategy {
             bytecode: bytecode.clone(),
             db: InMemoryDB::default(),
             trade_calldata: [0u8; 196],
+            trade_calldata_v2: [0u8; 292],
         };
 
         strategy.deploy()?;
@@ -101,21 +104,21 @@ impl EVMStrategy {
                 })
                 .build();
 
-            let result = evm.transact_commit()
+            let result = evm
+                .transact_commit()
                 .map_err(|e| EVMError::DeploymentFailed(format!("{:?}", e)))?;
 
             match result {
-                ExecutionResult::Success { output, .. } => {
-                    match output {
-                        Output::Create(code, _) => Ok(code),
-                        Output::Call(_) => {
-                            Err(EVMError::DeploymentFailed("Expected Create output".into()))
-                        }
+                ExecutionResult::Success { output, .. } => match output {
+                    Output::Create(code, _) => Ok(code),
+                    Output::Call(_) => {
+                        Err(EVMError::DeploymentFailed("Expected Create output".into()))
                     }
-                }
-                ExecutionResult::Revert { output, .. } => {
-                    Err(EVMError::DeploymentFailed(format!("Reverted: {:?}", output)))
-                }
+                },
+                ExecutionResult::Revert { output, .. } => Err(EVMError::DeploymentFailed(format!(
+                    "Reverted: {:?}",
+                    output
+                ))),
                 ExecutionResult::Halt { reason, .. } => {
                     Err(EVMError::DeploymentFailed(format!("Halted: {:?}", reason)))
                 }
@@ -146,7 +149,9 @@ impl EVMStrategy {
             if offset + 32 <= result.len() {
                 let length = u256_to_usize(&result[offset..offset + 32]).unwrap_or(0);
                 if offset + 32 + length <= result.len() {
-                    if let Ok(name) = String::from_utf8(result[offset + 32..offset + 32 + length].to_vec()) {
+                    if let Ok(name) =
+                        String::from_utf8(result[offset + 32..offset + 32 + length].to_vec())
+                    {
                         self.name = name;
                     }
                 }
@@ -164,8 +169,30 @@ impl EVMStrategy {
     /// Initialize the strategy with starting reserves.
     ///
     /// Returns (bid_fee, ask_fee) in WAD.
-    pub fn after_initialize(&mut self, initial_x: Wad, initial_y: Wad) -> Result<(Wad, Wad), EVMError> {
+    pub fn after_initialize(
+        &mut self,
+        initial_x: Wad,
+        initial_y: Wad,
+    ) -> Result<(Wad, Wad), EVMError> {
         let calldata = encode_after_initialize(initial_x, initial_y);
+        let result = self.call(&calldata, GAS_LIMIT_INIT)?;
+
+        decode_fee_pair(&result)
+            .ok_or_else(|| EVMError::InvalidReturnData("Failed to decode fee pair".into()))
+    }
+
+    /// Initialize the strategy with V2 pool/token context.
+    ///
+    /// Returns (bid_fee, ask_fee) in WAD.
+    pub fn after_initialize_v2(
+        &mut self,
+        initial_a: Wad,
+        initial_b: Wad,
+        pool_id: u64,
+        token_a: u64,
+        token_b: u64,
+    ) -> Result<(Wad, Wad), EVMError> {
+        let calldata = encode_after_initialize_v2(initial_a, initial_b, pool_id, token_a, token_b);
         let result = self.call(&calldata, GAS_LIMIT_INIT)?;
 
         decode_fee_pair(&result)
@@ -182,6 +209,20 @@ impl EVMStrategy {
 
         // Copy calldata to avoid borrow conflict
         let calldata = self.trade_calldata;
+        let result = self.call(&calldata, GAS_LIMIT_TRADE)?;
+
+        decode_fee_pair(&result)
+            .ok_or_else(|| EVMError::InvalidReturnData("Failed to decode fee pair".into()))
+    }
+
+    /// Handle a trade event using V2 callback and return updated fees.
+    ///
+    /// Returns (bid_fee, ask_fee) in WAD.
+    #[inline]
+    pub fn after_swap_v2(&mut self, trade: &TradeInfoV2) -> Result<(Wad, Wad), EVMError> {
+        trade.encode_calldata(&mut self.trade_calldata_v2);
+
+        let calldata = self.trade_calldata_v2;
         let result = self.call(&calldata, GAS_LIMIT_TRADE)?;
 
         decode_fee_pair(&result)
@@ -206,18 +247,17 @@ impl EVMStrategy {
             })
             .build();
 
-        let result = evm.transact_commit()
+        let result = evm
+            .transact_commit()
             .map_err(|e| EVMError::ExecutionFailed(format!("{:?}", e)))?;
 
         match result {
-            ExecutionResult::Success { output, .. } => {
-                match output {
-                    Output::Call(data) => Ok(data.to_vec()),
-                    Output::Create(_, _) => {
-                        Err(EVMError::ExecutionFailed("Unexpected Create output".into()))
-                    }
+            ExecutionResult::Success { output, .. } => match output {
+                Output::Call(data) => Ok(data.to_vec()),
+                Output::Create(_, _) => {
+                    Err(EVMError::ExecutionFailed("Unexpected Create output".into()))
                 }
-            }
+            },
             ExecutionResult::Revert { output, .. } => {
                 Err(EVMError::ExecutionFailed(format!("Reverted: {:?}", output)))
             }
@@ -249,8 +289,7 @@ fn u256_to_usize(data: &[u8]) -> Option<usize> {
 impl Clone for EVMStrategy {
     fn clone(&self) -> Self {
         // Create a fresh strategy from bytecode
-        Self::new(self.bytecode.clone(), self.name.clone())
-            .expect("Failed to clone EVMStrategy")
+        Self::new(self.bytecode.clone(), self.name.clone()).expect("Failed to clone EVMStrategy")
     }
 }
 

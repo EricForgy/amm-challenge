@@ -76,24 +76,19 @@ impl SimulationEngine {
         let submission_name = "submission".to_string();
         let baseline_name = "normalizer".to_string();
 
-        let mut amm_submission = CFMM::new(
-            submission,
-            self.config.initial_x,
-            self.config.initial_y,
-        );
+        let mut amm_submission =
+            CFMM::new(submission, self.config.initial_x, self.config.initial_y);
         amm_submission.name = submission_name.clone();
 
-        let mut amm_baseline = CFMM::new(
-            baseline,
-            self.config.initial_x,
-            self.config.initial_y,
-        );
+        let mut amm_baseline = CFMM::new(baseline, self.config.initial_x, self.config.initial_y);
         amm_baseline.name = baseline_name.clone();
 
         // Initialize AMMs
-        amm_submission.initialize()
+        amm_submission
+            .initialize()
             .map_err(|e| SimulationError::EVMError(e.to_string()))?;
-        amm_baseline.initialize()
+        amm_baseline
+            .initialize()
             .map_err(|e| SimulationError::EVMError(e.to_string()))?;
 
         // Record initial state

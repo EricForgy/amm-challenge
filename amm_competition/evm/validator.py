@@ -49,35 +49,39 @@ class SolidityValidator:
         (r"interface\s+\w+\s*\{(?![\s\S]*IAMMStrategy)", "Custom interfaces are not allowed"),
     ]
 
-    # Required patterns
-    REQUIRED_PATTERNS = [
-        # Must implement afterInitialize
-        (
-            r"function\s+afterInitialize\s*\(",
-            "Must implement afterInitialize(uint256, uint256) function",
-        ),
-        # Must implement afterSwap
-        (
-            r"function\s+afterSwap\s*\(",
-            "Must implement afterSwap(TradeInfo calldata) function",
-        ),
-        # Must implement getName
-        (
-            r"function\s+getName\s*\(",
-            "Must implement getName() function",
-        ),
+    REQUIRED_PATTERNS_V1 = [
+        (r"function\s+afterInitialize\s*\(", "Must implement afterInitialize(uint256, uint256) function"),
+        (r"function\s+afterSwap\s*\(", "Must implement afterSwap(TradeInfo calldata) function"),
+        (r"function\s+getName\s*\(", "Must implement getName() function"),
     ]
 
-    # Allowed imports (only base contracts)
+    REQUIRED_PATTERNS_V2 = [
+        (
+            r"function\s+afterInitializeV2\s*\(",
+            "Must implement afterInitializeV2(uint256,uint256,uint256,uint256,uint256) function",
+        ),
+        (
+            r"function\s+afterSwapV2\s*\(",
+            "Must implement afterSwapV2(TradeInfoV2 calldata) function",
+        ),
+        (r"function\s+getName\s*\(", "Must implement getName() function"),
+    ]
+
+    # Allowed imports (only base contracts/interfaces)
     ALLOWED_IMPORT_PATHS = {
         "AMMStrategyBase.sol",
         "IAMMStrategy.sol",
+        "AMMStrategyBaseV2.sol",
+        "IAMMStrategyV2.sol",
     }
 
     RESERVED_IDENTIFIERS = {
         "AMMStrategyBase",
+        "AMMStrategyBaseV2",
         "IAMMStrategy",
+        "IAMMStrategyV2",
         "TradeInfo",
+        "TradeInfoV2",
     }
 
     def validate(self, source_code: str) -> ValidationResult:
@@ -107,16 +111,18 @@ class SolidityValidator:
             if re.search(pattern, analysis_source, re.IGNORECASE):
                 errors.append(message)
 
-        contract_errors = self._validate_contract_declaration(analysis_source)
+        base_names, contract_errors = self._validate_contract_declaration(analysis_source)
         errors.extend(contract_errors)
 
-        # Check for required patterns
-        for pattern, message in self.REQUIRED_PATTERNS:
+        required_patterns = (
+            self.REQUIRED_PATTERNS_V2 if "AMMStrategyBaseV2" in base_names else self.REQUIRED_PATTERNS_V1
+        )
+        for pattern, message in required_patterns:
             if not re.search(pattern, analysis_source):
                 errors.append(message)
 
         # Validate imports
-        import_errors = self._validate_imports(import_source)
+        import_errors = self._validate_imports(import_source, "AMMStrategyBaseV2" in base_names)
         errors.extend(import_errors)
 
         # Prevent shadowing core interface/base names
@@ -146,15 +152,15 @@ class SolidityValidator:
             source = re.sub(r"'(?:\\.|[^'\\])*'", "''", source)
         return source
 
-    def _validate_contract_declaration(self, source_code: str) -> list[str]:
-        """Require `contract Strategy is ...` with AMMStrategyBase in inheritance list."""
+    def _validate_contract_declaration(self, source_code: str) -> tuple[list[str], list[str]]:
+        """Require `contract Strategy is ...` inheriting AMMStrategyBase or AMMStrategyBaseV2."""
         errors = []
         contract_match = re.search(r"\bcontract\s+Strategy\s+is\s+([^{}]+)\{", source_code)
         if not contract_match:
             errors.append(
-                "Contract must be named 'Strategy' and inherit from AMMStrategyBase"
+                "Contract must be named 'Strategy' and inherit from AMMStrategyBase or AMMStrategyBaseV2"
             )
-            return errors
+            return [], errors
 
         base_list = contract_match.group(1)
         base_names = []
@@ -167,14 +173,19 @@ class SolidityValidator:
             if name_match:
                 base_names.append(name_match.group(1))
 
-        if "AMMStrategyBase" not in base_names:
+        has_v1 = "AMMStrategyBase" in base_names
+        has_v2 = "AMMStrategyBaseV2" in base_names
+        if not has_v1 and not has_v2:
             errors.append(
-                "Contract must be named 'Strategy' and inherit from AMMStrategyBase"
+                "Contract must be named 'Strategy' and inherit from AMMStrategyBase or AMMStrategyBaseV2"
             )
 
-        return errors
+        if has_v1 and has_v2:
+            errors.append("Contract cannot inherit both AMMStrategyBase and AMMStrategyBaseV2")
 
-    def _validate_imports(self, source_code: str) -> list[str]:
+        return base_names, errors
+
+    def _validate_imports(self, source_code: str, is_v2: bool) -> list[str]:
         """Validate that only allowed imports are used.
 
         Args:
@@ -192,7 +203,7 @@ class SolidityValidator:
         if not imports:
             errors.append(
                 "Missing required imports. "
-                "Only './AMMStrategyBase.sol' and './IAMMStrategy.sol' are allowed."
+                "Only strategy base/interface imports are allowed."
             )
             return errors
 
@@ -202,12 +213,17 @@ class SolidityValidator:
             if normalized is None or normalized not in self.ALLOWED_IMPORT_PATHS:
                 errors.append(
                     f"Import '{import_path}' is not allowed. "
-                    "Only './AMMStrategyBase.sol' and './IAMMStrategy.sol' are allowed."
+                    "Only strategy base/interface imports are allowed."
                 )
                 continue
             seen.add(normalized)
 
-        missing = self.ALLOWED_IMPORT_PATHS - seen
+        required = (
+            {"AMMStrategyBaseV2.sol", "IAMMStrategyV2.sol"}
+            if is_v2
+            else {"AMMStrategyBase.sol", "IAMMStrategy.sol"}
+        )
+        missing = required - seen
         if missing:
             errors.append(
                 "Missing required base imports: "

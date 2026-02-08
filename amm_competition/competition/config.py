@@ -6,7 +6,7 @@ import os
 
 import amm_sim_rs
 
-from amm_competition.competition.match import HyperparameterVariance
+from amm_competition.competition.types import HyperparameterVariance
 
 
 @dataclass(frozen=True)
@@ -119,3 +119,96 @@ def build_config(
         retail_buy_prob=BASELINE_SETTINGS.retail_buy_prob,
         seed=seed,
     )
+
+
+def build_base_config_v2(
+    *,
+    seed: int | None,
+    pools: list[tuple[int, int, float, float]] | None = None,
+    initial_prices: list[float] | None = None,
+    numeraire_token: int = 0,
+) -> "amm_sim_rs.SimulationConfigV2":
+    """Build a canonical multi-asset SimulationConfigV2.
+
+    Defaults to a 3-asset / 3-pool triangular market that is useful for smoke tests.
+    """
+    if initial_prices is None:
+        initial_prices = [
+            1.0,
+            BASELINE_SETTINGS.initial_price,
+            BASELINE_SETTINGS.initial_price * 1.5,
+        ]
+    if pools is None:
+        pools = [
+            (0, 1, BASELINE_SETTINGS.initial_y, BASELINE_SETTINGS.initial_x),
+            (0, 2, BASELINE_SETTINGS.initial_y, BASELINE_SETTINGS.initial_x * (2 / 3)),
+            (1, 2, BASELINE_SETTINGS.initial_x, BASELINE_SETTINGS.initial_x * (2 / 3)),
+        ]
+
+    return amm_sim_rs.SimulationConfigV2(
+        n_steps=BASELINE_SETTINGS.n_steps,
+        initial_prices=initial_prices,
+        gbm_mu=BASELINE_SETTINGS.gbm_mu,
+        gbm_sigma=baseline_nominal_sigma(),
+        gbm_dt=BASELINE_SETTINGS.gbm_dt,
+        retail_arrival_rate=baseline_nominal_retail_rate(),
+        retail_mean_size=baseline_nominal_retail_size(),
+        retail_size_sigma=BASELINE_SETTINGS.retail_size_sigma,
+        retail_buy_prob=BASELINE_SETTINGS.retail_buy_prob,
+        numeraire_token=numeraire_token,
+        pools=pools,
+        seed=seed,
+    )
+
+
+def build_v2_configs_from_legacy(
+    *,
+    base_config: "amm_sim_rs.SimulationConfig",
+    n_simulations: int,
+    variance: HyperparameterVariance,
+) -> list["amm_sim_rs.SimulationConfigV2"]:
+    """Convert legacy single-pair config+variance into V2 configs.
+
+    Mapping:
+    - token 0 = X asset
+    - token 1 = Y asset (numeraire)
+    - one direct pool (0,1) with legacy reserves
+    """
+    import numpy as np
+
+    configs: list[amm_sim_rs.SimulationConfigV2] = []
+    for i in range(n_simulations):
+        rng = np.random.default_rng(seed=i)
+        retail_mean_size = (
+            rng.uniform(variance.retail_mean_size_min, variance.retail_mean_size_max)
+            if variance.vary_retail_mean_size
+            else base_config.retail_mean_size
+        )
+        retail_arrival_rate = (
+            rng.uniform(variance.retail_arrival_rate_min, variance.retail_arrival_rate_max)
+            if variance.vary_retail_arrival_rate
+            else base_config.retail_arrival_rate
+        )
+        gbm_sigma = (
+            rng.uniform(variance.gbm_sigma_min, variance.gbm_sigma_max)
+            if variance.vary_gbm_sigma
+            else base_config.gbm_sigma
+        )
+
+        configs.append(
+            amm_sim_rs.SimulationConfigV2(
+                n_steps=base_config.n_steps,
+                initial_prices=[base_config.initial_price, 1.0],
+                gbm_mu=base_config.gbm_mu,
+                gbm_sigma=gbm_sigma,
+                gbm_dt=base_config.gbm_dt,
+                retail_arrival_rate=retail_arrival_rate,
+                retail_mean_size=retail_mean_size,
+                retail_size_sigma=base_config.retail_size_sigma,
+                retail_buy_prob=base_config.retail_buy_prob,
+                numeraire_token=1,
+                pools=[(0, 1, base_config.initial_x, base_config.initial_y)],
+                seed=i,
+            )
+        )
+    return configs

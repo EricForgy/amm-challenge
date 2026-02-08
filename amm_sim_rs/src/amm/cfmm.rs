@@ -5,7 +5,7 @@
 //! This means fees count toward PnL but don't inflate the k constant.
 
 use crate::evm::EVMStrategy;
-use crate::types::trade_info::TradeInfo;
+use crate::types::trade_info::{TradeInfo, TradeInfoV2};
 use crate::types::wad::Wad;
 
 /// Fee quote (bid and ask fees).
@@ -21,7 +21,10 @@ impl FeeQuote {
     }
 
     pub fn symmetric(fee: Wad) -> Self {
-        Self { bid_fee: fee, ask_fee: fee }
+        Self {
+            bid_fee: fee,
+            ask_fee: fee,
+        }
     }
 }
 
@@ -38,6 +41,12 @@ pub struct TradeResult {
 /// Uses Uniswap V3/V4 fee model where fees are collected separately
 /// (not reinvested into liquidity).
 pub struct CFMM {
+    /// Pool identifier (used in multi-asset mode)
+    pub pool_id: usize,
+    /// First token index in pair (maps to X side in formulas)
+    pub token_a: usize,
+    /// Second token index in pair (maps to Y side in formulas)
+    pub token_b: usize,
     /// Strategy name
     pub name: String,
     /// EVM strategy for fee decisions
@@ -50,6 +59,8 @@ pub struct CFMM {
     current_fees: FeeQuote,
     /// Whether initialized
     initialized: bool,
+    /// Whether this pool uses V2 strategy callbacks
+    use_v2_callbacks: bool,
     /// Accumulated fees in X (collected separately, not in reserves)
     accumulated_fees_x: f64,
     /// Accumulated fees in Y (collected separately, not in reserves)
@@ -59,17 +70,39 @@ pub struct CFMM {
 impl CFMM {
     /// Create a new CFMM with the given strategy and reserves.
     pub fn new(strategy: EVMStrategy, reserve_x: f64, reserve_y: f64) -> Self {
+        Self::new_with_pair(strategy, reserve_x, reserve_y, 0, 1, 0)
+    }
+
+    /// Create a new CFMM with explicit token pair metadata.
+    pub fn new_with_pair(
+        strategy: EVMStrategy,
+        reserve_x: f64,
+        reserve_y: f64,
+        token_a: usize,
+        token_b: usize,
+        pool_id: usize,
+    ) -> Self {
         let name = strategy.name().to_string();
         Self {
+            pool_id,
+            token_a,
+            token_b,
             name,
             strategy,
             reserve_x,
             reserve_y,
             current_fees: FeeQuote::symmetric(Wad::from_bps(30)),
             initialized: false,
+            use_v2_callbacks: false,
             accumulated_fees_x: 0.0,
             accumulated_fees_y: 0.0,
         }
+    }
+
+    /// Returns true when this pool directly connects token_in -> token_out.
+    pub fn supports_pair(&self, token_in: usize, token_out: usize) -> bool {
+        (self.token_a == token_in && self.token_b == token_out)
+            || (self.token_b == token_in && self.token_a == token_out)
     }
 
     /// Initialize the AMM and get starting fees from strategy.
@@ -80,8 +113,30 @@ impl CFMM {
         let (bid_fee, ask_fee) = self.strategy.after_initialize(initial_x, initial_y)?;
         self.current_fees = FeeQuote::new(bid_fee.clamp_fee(), ask_fee.clamp_fee());
         self.initialized = true;
+        self.use_v2_callbacks = false;
 
         Ok(())
+    }
+
+    /// Initialize using V2 callback with context, with fallback to V1.
+    pub fn initialize_v2_or_fallback(&mut self) -> Result<(), crate::evm::strategy::EVMError> {
+        let initial_a = Wad::from_f64(self.reserve_x);
+        let initial_b = Wad::from_f64(self.reserve_y);
+        match self.strategy.after_initialize_v2(
+            initial_a,
+            initial_b,
+            self.pool_id as u64,
+            self.token_a as u64,
+            self.token_b as u64,
+        ) {
+            Ok((bid_fee, ask_fee)) => {
+                self.current_fees = FeeQuote::new(bid_fee.clamp_fee(), ask_fee.clamp_fee());
+                self.initialized = true;
+                self.use_v2_callbacks = true;
+                Ok(())
+            }
+            Err(_) => self.initialize(),
+        }
     }
 
     /// Get current reserves.
@@ -196,6 +251,30 @@ impl CFMM {
         }
     }
 
+    /// Quote exact-input swap for arbitrary token direction.
+    ///
+    /// Returns (amount_out, fee_amount_in_token_in).
+    #[inline]
+    pub fn quote_exact_in(
+        &self,
+        token_in: usize,
+        token_out: usize,
+        amount_in: f64,
+    ) -> Option<(f64, f64)> {
+        if amount_in <= 0.0 || !self.supports_pair(token_in, token_out) {
+            return None;
+        }
+        if token_in == self.token_a && token_out == self.token_b {
+            let (out, fee) = self.quote_buy_x(amount_in);
+            return Some((out, fee));
+        }
+        if token_in == self.token_b && token_out == self.token_a {
+            let (out, fee) = self.quote_x_for_y(amount_in);
+            return Some((out, fee));
+        }
+        None
+    }
+
     /// Execute trade where AMM buys X (trader sells X for Y).
     pub fn execute_buy_x(&mut self, amount_x: f64, timestamp: u64) -> Option<TradeResult> {
         let (y_out, fee_amount) = self.quote_buy_x(amount_x);
@@ -289,21 +368,69 @@ impl CFMM {
         })
     }
 
+    /// Execute an exact-input swap in arbitrary token direction.
+    ///
+    /// Returns (amount_out, is_buy_from_amm_perspective) on success.
+    pub fn execute_exact_in(
+        &mut self,
+        token_in: usize,
+        token_out: usize,
+        amount_in: f64,
+        timestamp: u64,
+    ) -> Option<(f64, bool)> {
+        if token_in == self.token_a && token_out == self.token_b {
+            let result = self.execute_buy_x(amount_in, timestamp)?;
+            return Some((result.trade_info.amount_y.to_f64(), true));
+        }
+
+        if token_in == self.token_b && token_out == self.token_a {
+            let result = self.execute_buy_x_with_y(amount_in, timestamp)?;
+            return Some((result.trade_info.amount_x.to_f64(), false));
+        }
+
+        None
+    }
+
     /// Update fees from strategy after a trade.
     fn update_fees(&mut self, trade_info: &TradeInfo) {
-        if let Ok((bid_fee, ask_fee)) = self.strategy.after_swap(trade_info) {
+        if self.use_v2_callbacks {
+            let trade_v2 = TradeInfoV2 {
+                is_buy: trade_info.is_buy,
+                amount_a: trade_info.amount_x,
+                amount_b: trade_info.amount_y,
+                timestamp: trade_info.timestamp,
+                reserve_a: trade_info.reserve_x,
+                reserve_b: trade_info.reserve_y,
+                pool_id: self.pool_id as u64,
+                token_a: self.token_a as u64,
+                token_b: self.token_b as u64,
+            };
+
+            if let Ok((bid_fee, ask_fee)) = self.strategy.after_swap_v2(&trade_v2) {
+                self.current_fees = FeeQuote::new(bid_fee.clamp_fee(), ask_fee.clamp_fee());
+            } else if let Ok((bid_fee, ask_fee)) = self.strategy.after_swap(trade_info) {
+                // Keep running even if V2 callback reverts.
+                self.current_fees = FeeQuote::new(bid_fee.clamp_fee(), ask_fee.clamp_fee());
+                self.use_v2_callbacks = false;
+            }
+        } else if let Ok((bid_fee, ask_fee)) = self.strategy.after_swap(trade_info) {
             self.current_fees = FeeQuote::new(bid_fee.clamp_fee(), ask_fee.clamp_fee());
         }
         // On error, keep current fees
     }
 
     /// Reset the AMM for a new simulation.
-    pub fn reset(&mut self, reserve_x: f64, reserve_y: f64) -> Result<(), crate::evm::strategy::EVMError> {
+    pub fn reset(
+        &mut self,
+        reserve_x: f64,
+        reserve_y: f64,
+    ) -> Result<(), crate::evm::strategy::EVMError> {
         self.reserve_x = reserve_x;
         self.reserve_y = reserve_y;
         self.accumulated_fees_x = 0.0;
         self.accumulated_fees_y = 0.0;
         self.initialized = false;
+        self.use_v2_callbacks = false;
         self.strategy.reset()
     }
 }

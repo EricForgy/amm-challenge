@@ -94,16 +94,8 @@ impl LightweightSimResult {
 
         let pnl_a = self.pnl.get(names[0]).copied().unwrap_or(0.0);
         let pnl_b = self.pnl.get(names[1]).copied().unwrap_or(0.0);
-        let edge_a = self
-            .edges
-            .get(names[0])
-            .copied()
-            .unwrap_or(pnl_a);
-        let edge_b = self
-            .edges
-            .get(names[1])
-            .copied()
-            .unwrap_or(pnl_b);
+        let edge_a = self.edges.get(names[0]).copied().unwrap_or(pnl_a);
+        let edge_b = self.edges.get(names[1]).copied().unwrap_or(pnl_b);
 
         if edge_a > edge_b {
             Some(names[0].clone())
@@ -153,16 +145,8 @@ impl BatchSimulationResult {
         for result in &self.results {
             let pnl_a = result.pnl.get(name_a).copied().unwrap_or(0.0);
             let pnl_b = result.pnl.get(name_b).copied().unwrap_or(0.0);
-            let edge_a = result
-                .edges
-                .get(name_a)
-                .copied()
-                .unwrap_or(pnl_a);
-            let edge_b = result
-                .edges
-                .get(name_b)
-                .copied()
-                .unwrap_or(pnl_b);
+            let edge_a = result.edges.get(name_a).copied().unwrap_or(pnl_a);
+            let edge_b = result.edges.get(name_b).copied().unwrap_or(pnl_b);
 
             if edge_a > edge_b {
                 wins_a += 1;
@@ -212,11 +196,108 @@ impl BatchSimulationResult {
         let (wins_a, wins_b, draws) = self.win_counts();
         format!(
             "BatchSimulationResult(n={}, wins=({}, {}, {}))",
-            self.results.len(), wins_a, wins_b, draws
+            self.results.len(),
+            wins_a,
+            wins_b,
+            draws
         )
     }
 
     fn __len__(&self) -> usize {
         self.results.len()
+    }
+}
+
+/// Per-pool state snapshot at end of simulation (V2).
+#[pyclass]
+#[derive(Debug, Clone)]
+pub struct PoolStateV2 {
+    #[pyo3(get)]
+    pub pool_id: usize,
+    #[pyo3(get)]
+    pub token_a: usize,
+    #[pyo3(get)]
+    pub token_b: usize,
+    #[pyo3(get)]
+    pub reserve_a: f64,
+    #[pyo3(get)]
+    pub reserve_b: f64,
+}
+
+#[pymethods]
+impl PoolStateV2 {
+    fn __repr__(&self) -> String {
+        format!(
+            "PoolStateV2(id={}, pair=({},{}) reserves=({},{}))",
+            self.pool_id, self.token_a, self.token_b, self.reserve_a, self.reserve_b
+        )
+    }
+}
+
+/// Lightweight simulation result for multi-asset mode.
+#[pyclass]
+#[derive(Debug, Clone)]
+pub struct LightweightSimResultV2 {
+    /// Seed used for this simulation
+    #[pyo3(get)]
+    pub seed: u64,
+
+    /// Strategy names
+    #[pyo3(get)]
+    pub strategies: Vec<String>,
+
+    /// Final PnL in numeraire by strategy name
+    #[pyo3(get)]
+    pub pnl: HashMap<String, f64>,
+
+    /// Edge in numeraire by strategy name
+    #[pyo3(get)]
+    pub edges: HashMap<String, f64>,
+
+    /// Final token fair prices in numeraire terms
+    #[pyo3(get)]
+    pub final_prices: Vec<f64>,
+
+    /// Final reserves by pool id
+    #[pyo3(get)]
+    pub pools: Vec<PoolStateV2>,
+}
+
+#[pymethods]
+impl LightweightSimResultV2 {
+    fn __repr__(&self) -> String {
+        format!(
+            "LightweightSimResultV2(seed={}, n_pools={})",
+            self.seed,
+            self.pools.len()
+        )
+    }
+}
+
+/// Batch result for multi-asset simulations.
+#[pyclass]
+#[derive(Debug, Clone)]
+pub struct BatchSimulationResultV2 {
+    /// Individual simulation results
+    #[pyo3(get)]
+    pub results: Vec<LightweightSimResultV2>,
+
+    /// Strategy names
+    #[pyo3(get)]
+    pub strategies: Vec<String>,
+}
+
+#[pymethods]
+impl BatchSimulationResultV2 {
+    fn __len__(&self) -> usize {
+        self.results.len()
+    }
+
+    fn __repr__(&self) -> String {
+        format!(
+            "BatchSimulationResultV2(n={}, strategies={:?})",
+            self.results.len(),
+            self.strategies
+        )
     }
 }

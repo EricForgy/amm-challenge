@@ -5,7 +5,7 @@
 //! - Fees: 30 bps = 0.003 = 30e14 WAD
 //! - Max fee: 10% = 0.1 = 1e17 WAD
 
-use std::ops::{Add, Sub, Mul, Div, Neg};
+use std::ops::{Add, Div, Mul, Neg, Sub};
 
 /// WAD precision constant (1e18)
 pub const WAD: i128 = 1_000_000_000_000_000_000;

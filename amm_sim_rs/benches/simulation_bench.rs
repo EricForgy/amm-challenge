@@ -19,9 +19,7 @@ fn benchmark_wad_operations(c: &mut Criterion) {
         bench.iter(|| black_box(a).wdiv(black_box(b)))
     });
 
-    c.bench_function("wad_sqrt", |bench| {
-        bench.iter(|| black_box(a).sqrt())
-    });
+    c.bench_function("wad_sqrt", |bench| bench.iter(|| black_box(a).sqrt()));
 }
 
 fn benchmark_price_process(c: &mut Criterion) {
@@ -29,13 +27,11 @@ fn benchmark_price_process(c: &mut Criterion) {
 
     let mut process = GBMPriceProcess::new(100.0, 0.0, 0.001, 1.0, Some(42));
 
-    c.bench_function("gbm_step", |bench| {
-        bench.iter(|| process.step())
-    });
+    c.bench_function("gbm_step", |bench| bench.iter(|| process.step()));
 }
 
 fn benchmark_trade_info_encoding(c: &mut Criterion) {
-    use amm_sim_rs::types::trade_info::TradeInfo;
+    use amm_sim_rs::types::trade_info::{TradeInfo, TradeInfoV2};
     use amm_sim_rs::types::wad::Wad;
 
     let trade = TradeInfo::new(
@@ -55,12 +51,31 @@ fn benchmark_trade_info_encoding(c: &mut Criterion) {
             black_box(&buffer)
         })
     });
+
+    let trade_v2 = TradeInfoV2 {
+        is_buy: false,
+        amount_a: Wad::from_f64(1.25),
+        amount_b: Wad::from_f64(100.5),
+        timestamp: 100,
+        reserve_a: Wad::from_f64(1000.0),
+        reserve_b: Wad::from_f64(100000.0),
+        pool_id: 4,
+        token_a: 1,
+        token_b: 2,
+    };
+    let mut buffer_v2 = [0u8; 292];
+    c.bench_function("trade_info_v2_encode", |bench| {
+        bench.iter(|| {
+            trade_v2.encode_calldata(&mut buffer_v2);
+            black_box(&buffer_v2)
+        })
+    });
 }
 
 fn benchmark_retail_trader(c: &mut Criterion) {
     use amm_sim_rs::market::RetailTrader;
 
-    let mut trader = RetailTrader::new(5.0, 2.0, 0.5, Some(42));
+    let mut trader = RetailTrader::new(5.0, 2.0, 0.5, 0.5, Some(42));
 
     c.bench_function("retail_generate_orders", |bench| {
         bench.iter(|| black_box(trader.generate_orders()))

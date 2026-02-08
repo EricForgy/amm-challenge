@@ -218,3 +218,25 @@ Example `v2_config.json`:
 ```
 
 Output is your average edge across simulations. The 30 bps normalizer typically scores around 250-350 edge depending on market conditions.
+
+## Web Frontend (Vercel)
+
+A Vercel-ready frontend lives in `web/` and is intentionally API-driven.
+
+It does not execute simulation logic on Vercel. Instead, it calls a separate backend that runs your existing Python/Rust engine.
+
+```bash
+cd web
+cp .env.example .env.local
+npm install
+npm run dev
+```
+
+Set `NEXT_PUBLIC_API_BASE_URL` in `web/.env.local`.
+
+For Vercel deployment:
+
+1. Import the repo.
+2. Set Root Directory to `web`.
+3. Add `NEXT_PUBLIC_API_BASE_URL` environment variable.
+4. Deploy.

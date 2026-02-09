@@ -2,27 +2,36 @@
 
 This is a standalone Next.js frontend intended for Vercel deployment.
 
-It does not run simulations locally inside Vercel. Instead, it calls an external API backend that executes validation/simulation using the Python/Rust engine.
+It supports two modes:
+
+- Local mode: browser worker simulation for fast, unverified iteration.
+- Verified mode: Next.js API (`app/api/*`) re-runs submissions and records leaderboard entries with rate limiting.
+
+All of this lives under `web/`.
+
+TEVM-backed strategy profile resolution + compile path is implemented in `web/lib/sim/runtime.server.js`.
+
+- Server/API runs request `useTevm: true`
+- Local worker runs use `useTevm: false` (browser-safe fast mode)
+- If TEVM/solc fails, runtime falls back to deterministic parser mode so the app remains usable
 
 ## Local run
 
 ```bash
 cd web
-cp .env.example .env.local
 npm install
 npm run dev
 ```
 
-Set `NEXT_PUBLIC_API_BASE_URL` in `.env.local` to your backend URL.
+This app uses built-in Next.js API routes (`/api/*`) by default and does not require an external API server.
 
 ## Deploy to Vercel
 
 1. Import this repo in Vercel.
 2. Set the project Root Directory to `web`.
-3. Add env var `NEXT_PUBLIC_API_BASE_URL` in Vercel Project Settings.
-4. Deploy.
+3. Deploy.
 
-## Expected backend endpoints
+## Built-In API Endpoints
 
 - `POST /api/validate`
   - body: `{ "source_code": "..." }`
@@ -30,5 +39,9 @@ Set `NEXT_PUBLIC_API_BASE_URL` in `.env.local` to your backend URL.
   - body: `{ "source_code": "...", "simulations": 100, "steps": 1000 }`
 - `POST /api/run-v2`
   - body: `{ "source_code": "...", "config": { ... } }`
+- `POST /api/submissions`
+  - body: `{ "source_code": "...", "strategy_label": "...", "run_type": "v1|v2", ... }`
+- `GET /api/submissions/:id`
+- `GET /api/leaderboard`
 
 All responses should be JSON.

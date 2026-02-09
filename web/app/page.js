@@ -22,14 +22,17 @@ export default function HomePage() {
     <main className="shell">
       <section className="hero card">
         <p className="kicker">AMM Challenge</p>
-        <h1>Frontend deployable to Vercel, backend kept separate.</h1>
+        <h1>Dark-mode local simulator with built-in verified API routes.</h1>
         <p>
-          This UI is intentionally thin: it calls your simulation API and keeps heavy
-          execution out of Vercel functions.
+          Run quick local experiments in-browser, then submit for trusted scoring and
+          leaderboard placement through the same Next.js app.
         </p>
         <div className="heroActions">
           <Link href="/submit" className="btn btnPrimary">
             Open Submission Console
+          </Link>
+          <Link href="/leaderboard" className="btn btnGhost">
+            View Leaderboard
           </Link>
           <a href="https://www.ammchallenge.com/" className="btn btnGhost" target="_blank" rel="noreferrer">
             Reference Site

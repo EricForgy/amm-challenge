@@ -1,13 +1,16 @@
 :root {
-  --bg-0: #f6f3eb;
-  --bg-1: #e7e2d5;
-  --ink: #192125;
-  --muted: #4f5c63;
-  --card: #fffaf1;
-  --line: #d7cfbf;
-  --primary: #0f7c67;
-  --primary-ink: #ffffff;
-  --alert: #b42318;
+  --bg-0: #090e18;
+  --bg-1: #0d1424;
+  --bg-2: #121c30;
+  --ink: #d6e2f5;
+  --muted: #8ca0bd;
+  --card: #0f1829;
+  --card-soft: #111f34;
+  --line: #25334f;
+  --primary: #35c5b0;
+  --primary-ink: #042320;
+  --alert: #ff7d92;
+  --warn: #ffcf6e;
   --radius: 16px;
 }
 
@@ -23,25 +26,27 @@ body {
 }
 
 body {
-  font-family: var(--font-space), sans-serif;
+  font-family: "Avenir Next", "Segoe UI", "Trebuchet MS", sans-serif;
   color: var(--ink);
-  background: radial-gradient(1200px 800px at 10% -20%, #ffffff 0%, transparent 70%),
+  background:
+    radial-gradient(1200px 800px at 90% -10%, rgba(53, 197, 176, 0.2) 0%, transparent 60%),
+    radial-gradient(800px 500px at -10% 30%, rgba(87, 129, 255, 0.18) 0%, transparent 60%),
     linear-gradient(160deg, var(--bg-0), var(--bg-1));
 }
 
 .shell {
   width: min(1100px, 94vw);
-  margin: 32px auto 64px;
+  margin: 40px auto 64px;
   display: grid;
-  gap: 20px;
+  gap: 18px;
 }
 
 .card {
-  background: linear-gradient(165deg, var(--card), #fffdf8);
+  background: linear-gradient(165deg, var(--card), var(--card-soft));
   border: 1px solid var(--line);
   border-radius: var(--radius);
   padding: 22px;
-  box-shadow: 0 8px 30px rgba(17, 24, 39, 0.08);
+  box-shadow: 0 24px 64px rgba(3, 8, 15, 0.45);
   animation: rise 350ms ease-out both;
 }
 
@@ -57,7 +62,7 @@ body {
   color: var(--muted);
   font-size: 0.84rem;
   text-transform: uppercase;
-  letter-spacing: 0.08em;
+  letter-spacing: 0.14em;
 }
 
 .heroActions {
@@ -71,7 +76,7 @@ body {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  border-radius: 12px;
+  border-radius: 10px;
   padding: 10px 14px;
   border: 1px solid transparent;
   cursor: pointer;
@@ -86,14 +91,14 @@ body {
 
 .btnPrimary {
   color: var(--primary-ink);
-  background: linear-gradient(160deg, #169f86, var(--primary));
-  box-shadow: 0 8px 20px rgba(15, 124, 103, 0.22);
+  background: linear-gradient(160deg, #5ce0cd, var(--primary));
+  box-shadow: 0 10px 24px rgba(53, 197, 176, 0.28);
 }
 
 .btnGhost {
   color: var(--ink);
   border-color: var(--line);
-  background: rgba(255, 255, 255, 0.4);
+  background: rgba(15, 26, 43, 0.75);
 }
 
 .grid {
@@ -120,15 +125,16 @@ body {
 
 .tab {
   border: 1px solid var(--line);
-  background: #f9f6ef;
+  background: rgba(15, 28, 48, 0.85);
+  color: var(--muted);
   border-radius: 999px;
   padding: 8px 12px;
   cursor: pointer;
 }
 
 .tabActive {
-  border-color: transparent;
-  color: white;
+  border-color: #6ae9d6;
+  color: #0e1d30;
   background: var(--primary);
 }
 
@@ -138,7 +144,11 @@ body {
 }
 
 .apiHint code {
-  font-family: var(--font-mono), monospace;
+  font-family: "IBM Plex Mono", "SFMono-Regular", Menlo, Consolas, monospace;
+  background: rgba(32, 47, 74, 0.8);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 2px 6px;
 }
 
 .label {
@@ -151,21 +161,79 @@ body {
 .editor {
   width: 100%;
   min-height: 320px;
-  border: 1px solid var(--line);
-  background: #fffdfa;
-  border-radius: 12px;
-  padding: 12px;
-  font-family: var(--font-mono), monospace;
-  font-size: 0.85rem;
+  border: 0;
+  background: transparent;
+  border-radius: 0;
+  padding: 12px 14px;
+  font-family: "IBM Plex Mono", "SFMono-Regular", Menlo, Consolas, monospace;
+  font-size: 0.86rem;
+  line-height: 1.55;
+  color: #dce9ff;
+  resize: vertical;
+  outline: none;
 }
 
 .editorSmall {
   min-height: 220px;
 }
 
+.ideShell {
+  margin-top: 8px;
+  border: 1px solid #2a3958;
+  border-radius: 12px;
+  overflow: hidden;
+  background: #0b1220;
+}
+
+.ideTop {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 12px;
+  background: linear-gradient(180deg, #121e34, #0f192b);
+  border-bottom: 1px solid #243655;
+  color: #9eb4d4;
+  font-size: 0.82rem;
+  font-family: "IBM Plex Mono", "SFMono-Regular", Menlo, Consolas, monospace;
+}
+
+.ideDots {
+  display: inline-flex;
+  gap: 6px;
+}
+
+.ideDots span {
+  width: 10px;
+  height: 10px;
+  border-radius: 999px;
+  background: #2a3a5a;
+}
+
+.ideDots span:nth-child(1) {
+  background: #ff6b7d;
+}
+
+.ideDots span:nth-child(2) {
+  background: #ffbf5f;
+}
+
+.ideDots span:nth-child(3) {
+  background: #4fd0b8;
+}
+
+.editorMeta {
+  margin-top: 10px;
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+  color: var(--muted);
+  font-size: 0.78rem;
+}
+
 .inlineFields {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 220px));
+  grid-template-columns: repeat(3, minmax(0, 220px));
   gap: 12px;
   margin: 12px 0;
 }
@@ -181,24 +249,202 @@ body {
   border-radius: 10px;
   padding: 9px;
   font-size: 0.95rem;
+  color: var(--ink);
+  background: #0d1728;
+}
+
+.settingsBar {
+  margin-top: 10px;
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+.settingsInput,
+.settingsSelect {
+  min-width: 240px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 9px 10px;
+  color: var(--ink);
+  background: #0d1728;
+}
+
+.btnDanger {
+  border-color: rgba(255, 125, 146, 0.6);
+  color: #ffc8d2;
+}
+
+.hintTiny {
+  margin-top: 8px;
+  font-size: 0.78rem;
+  color: var(--muted);
 }
 
 .result {
   margin-top: 14px;
   border: 1px solid var(--line);
-  background: #fff;
+  background: #0a1323;
   border-radius: 12px;
   padding: 12px;
   max-height: 320px;
   overflow: auto;
-  font-family: var(--font-mono), monospace;
+  font-family: "IBM Plex Mono", "SFMono-Regular", Menlo, Consolas, monospace;
   font-size: 0.82rem;
 }
 
 .resultError {
-  border-color: #f4c7c3;
-  background: #fff2f0;
+  border-color: rgba(255, 125, 146, 0.5);
+  background: rgba(69, 13, 25, 0.6);
   color: var(--alert);
+}
+
+.tableWrap {
+  margin-top: 14px;
+  overflow-x: auto;
+}
+
+.scoreTable {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.92rem;
+}
+
+.scoreTable th,
+.scoreTable td {
+  text-align: left;
+  border-bottom: 1px solid var(--line);
+  padding: 10px 8px;
+}
+
+.scoreTable thead th {
+  color: var(--muted);
+  font-size: 0.82rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.scoreTable tbody tr:hover {
+  background: rgba(24, 39, 63, 0.75);
+}
+
+.collapse {
+  margin-top: 14px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: rgba(11, 19, 35, 0.6);
+  overflow: hidden;
+}
+
+.collapseHead {
+  width: 100%;
+  border: 0;
+  background: linear-gradient(180deg, #121c31, #0e182a);
+  color: var(--ink);
+  text-align: left;
+  padding: 10px 12px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  cursor: pointer;
+}
+
+.collapseChevron {
+  color: var(--muted);
+  transition: transform 120ms ease;
+}
+
+.collapseChevron.open {
+  transform: rotate(90deg);
+}
+
+.collapseTitleWrap {
+  display: grid;
+}
+
+.collapseTitle {
+  font-weight: 600;
+  font-size: 0.95rem;
+}
+
+.collapseSubtitle {
+  color: var(--muted);
+  font-size: 0.78rem;
+}
+
+.collapseBody {
+  padding: 12px;
+}
+
+.chartPanel h1 {
+  margin: 2px 0 8px;
+}
+
+.legendRow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin: 4px 0 12px;
+}
+
+.chartModeRow {
+  display: inline-flex;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  overflow: hidden;
+  margin-bottom: 10px;
+}
+
+.chartModeBtn {
+  border: 0;
+  background: #0f1b30;
+  color: var(--muted);
+  padding: 7px 12px;
+  cursor: pointer;
+  font-size: 0.82rem;
+}
+
+.chartModeBtn + .chartModeBtn {
+  border-left: 1px solid var(--line);
+}
+
+.chartModeBtn.active {
+  background: #1f365a;
+  color: var(--ink);
+}
+
+.legendItem {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--muted);
+  font-size: 0.83rem;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 4px 10px;
+  background: rgba(15, 28, 48, 0.75);
+}
+
+.legendItem i {
+  width: 9px;
+  height: 9px;
+  border-radius: 999px;
+  display: inline-block;
+}
+
+.chartWrap {
+  width: 100%;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: linear-gradient(180deg, #0d1526, #0a101d);
+  overflow: hidden;
+}
+
+.priceChart {
+  width: 100%;
+  height: 340px;
+  display: block;
 }
 
 @keyframes rise {
@@ -220,4 +466,5 @@ body {
   .inlineFields {
     grid-template-columns: 1fr;
   }
+
 }

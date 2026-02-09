@@ -222,21 +222,23 @@ Output is your average edge across simulations. The 30 bps normalizer typically 
 ## Web Frontend (Vercel)
 
 A Vercel-ready frontend lives in `web/` and is intentionally API-driven.
+The `web/` app is TypeScript/JavaScript-only and does not import Python/Rust runtime modules.
 
-It does not execute simulation logic on Vercel. Instead, it calls a separate backend that runs your existing Python/Rust engine.
+It now includes:
+
+1. Browser local mode (Web Worker, unverified results)
+2. Built-in Next.js API mode for verified submissions and leaderboard (`web/app/api/*`)
 
 ```bash
 cd web
-cp .env.example .env.local
 npm install
 npm run dev
 ```
 
-Set `NEXT_PUBLIC_API_BASE_URL` in `web/.env.local`.
+The frontend uses built-in Next.js API routes under `/api` (no external API server required).
 
 For Vercel deployment:
 
 1. Import the repo.
 2. Set Root Directory to `web`.
-3. Add `NEXT_PUBLIC_API_BASE_URL` environment variable.
-4. Deploy.
+3. Deploy.

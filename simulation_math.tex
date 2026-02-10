@@ -1,0 +1,303 @@
+\documentclass[11pt]{article}
+\usepackage[margin=1in]{geometry}
+\usepackage{amsmath,amssymb}
+\usepackage{booktabs}
+\usepackage{array}
+
+\title{Reverse-Engineered Mathematics of the AMM Simulation Tool}
+\author{}
+\date{}
+
+\begin{document}
+\maketitle
+
+\section{What This Document Is Doing}
+This is a readable reconstruction of the simulator's math from the source code.
+The goals are:
+\begin{itemize}
+\item explain what happens each step in plain language,
+\item define every symbol before using it,
+\item connect the formulas to what the code is trying to optimize.
+\end{itemize}
+
+\section{Notation Glossary}
+\begin{center}
+\begin{tabular}{>{\raggedright\arraybackslash}p{0.2\textwidth} p{0.7\textwidth}}
+\toprule
+Symbol & Meaning \\
+\midrule
+$X, Y$ & The two tokens. Prices are quoted in units of $Y$ per $X$. \\
+$x, y$ & Current AMM reserves of $X$ and $Y$. \\
+$k$ & Constant product invariant, $k=xy$. \\
+$P$ & AMM spot price, $P=y/x$. \\
+$S_t$ & Exogenous fair price at step $t$ from GBM. \\
+$f^{\mathrm{bid}}, f^{\mathrm{ask}}$ & Bid fee (AMM buys $X$) and ask fee (AMM sells $X$). \\
+$\gamma$ & Net input multiplier, $\gamma=1-f$. \\
+$F^x, F^y$ & Fees accumulated outside reserves, in token $X$ and token $Y$. \\
+$T$ & Number of simulation steps. \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\section{High-Level Simulation Loop}
+Each run has two AMMs:
+\begin{itemize}
+\item your submission AMM,
+\item the normalizer AMM (fixed $30$ bps on both sides).
+\end{itemize}
+Both start from identical state:
+\[
+x_0 = 100,\quad y_0 = 10{,}000,\quad S_0 = 100.
+\]
+
+For each step $t=1,\dots,T$:
+\begin{enumerate}
+\item Update fair price $S_t$ via GBM.
+\item For each AMM separately, run one profit-maximizing arbitrage trade (if profitable).
+\item Sample uninformed retail orders and route each order optimally across AMMs.
+\item Update edge, running PnL, and fee statistics.
+\end{enumerate}
+
+\section{AMM Core Mechanics}
+For each AMM $i\in\{s,n\}$, reserves satisfy constant product:
+\[
+k_i = x_i y_i.
+\]
+Spot price is
+\[
+P_i = \frac{y_i}{x_i}.
+\]
+Fees are \emph{fee-on-input} and side-dependent:
+\[
+f_i^{\mathrm{bid}},\quad f_i^{\mathrm{ask}},\quad
+\gamma_i^{\mathrm{bid}}=1-f_i^{\mathrm{bid}},\quad
+\gamma_i^{\mathrm{ask}}=1-f_i^{\mathrm{ask}}.
+\]
+Important implementation detail: fees are \textbf{not} added back into reserves.
+They are tracked separately as $(F^x_i,F^y_i)$, and only counted in PnL valuation.
+
+\subsection*{Trade Type A: AMM buys $X$ (trader sells $X$)}
+Trader sends gross $q_x>0$ units of $X$. Only $\gamma q_x$ enters reserves:
+\[
+\Delta x_{\text{net}}=\gamma q_x,\quad
+x' = x+\Delta x_{\text{net}},\quad
+y' = \frac{k}{x'},\quad
+\Delta y_{\text{out}}=y-y'.
+\]
+The AMM pays out $\Delta y_{\text{out}}$ in $Y$. Fee accounting:
+\[
+F^x \leftarrow F^x + f^{\mathrm{bid}} q_x.
+\]
+
+\subsection*{Trade Type B: AMM sells $X$ (trader asks for fixed $q_x$ output)}
+Trader requests $q_x$ units of $X$ out. First solve net $Y$ needed by invariant:
+\[
+x' = x-q_x,\quad
+y' = \frac{k}{x'},\quad
+\Delta y_{\text{net}}=y'-y,\quad
+\Delta y_{\text{gross}}=\frac{\Delta y_{\text{net}}}{\gamma}.
+\]
+Trader pays $\Delta y_{\text{gross}}$, while only $\Delta y_{\text{net}}$ reaches reserves:
+\[
+F^y \leftarrow F^y + (\Delta y_{\text{gross}}-\Delta y_{\text{net}}).
+\]
+
+\subsection*{Trade Type C: AMM sells $X$ (trader provides fixed $q_y$ input)}
+This is used for retail buy orders:
+\[
+\Delta y_{\text{net}}=\gamma q_y,\quad
+y'=y+\Delta y_{\text{net}},\quad
+x'=\frac{k}{y'},\quad
+\Delta x_{\text{out}}=x-x'.
+\]
+Fee accounting:
+\[
+F^y \leftarrow F^y + f^{\mathrm{ask}} q_y.
+\]
+
+\section{Fair Price Dynamics (GBM)}
+The fair price $S_t$ follows:
+\[
+S_{t+1} = S_t \exp\!\left((\mu-\tfrac12\sigma^2)\Delta t + \sigma\sqrt{\Delta t}\,Z_t\right),
+\quad Z_t\sim\mathcal N(0,1).
+\]
+Defaults are $\mu=0$, $\Delta t=1$, and each simulation samples
+\[
+\sigma \sim \mathrm{Uniform}(0.000882,\,0.001008).
+\]
+Interpretation: fair price is a random walk in log-space with no drift.
+
+\section{Arbitrage Module}
+Given fair price $S$ and AMM state $(x,y)$:
+\begin{itemize}
+\item if AMM spot $P< S$, AMM is too cheap in $X$ and arbitrageur buys $X$ from AMM;
+\item if AMM spot $P> S$, AMM is too expensive in $X$ and arbitrageur sells $X$ to AMM.
+\end{itemize}
+The simulator uses closed forms that maximize one-trade arbitrage profit.
+
+\subsection*{Case A: $P< S$ (buy $X$ from AMM)}
+Ask-side gamma is $\gamma=1-f^{\mathrm{ask}}$.
+Profit objective:
+\[
+\Pi(q_x)=q_x S - \Delta y_{\text{gross}}(q_x).
+\]
+Closed-form optimizer used by the engine:
+\[
+q_x^\star = x-\sqrt{\frac{k}{\gamma S}}.
+\]
+Implementation guardrail: $q_x^\star$ is capped by $0.99x$.
+
+\subsection*{Case B: $P> S$ (sell $X$ to AMM)}
+Bid-side gamma is $\gamma=1-f^{\mathrm{bid}}$. Optimal gross input:
+\[
+q_x^{\star}=\frac{\sqrt{k\gamma/S}-x}{\gamma}.
+\]
+Profit objective:
+\[
+\Pi(q_x)=\Delta y_{\text{out}}(q_x)-q_x S.
+\]
+Trade executes only if quoted profit is strictly positive.
+
+\section{Retail Order Generation}
+At each step, number of retail orders:
+\[
+N_t\sim\mathrm{Poisson}(\lambda),\quad \lambda\sim\mathrm{Uniform}(0.6,1.0)\ \text{(per simulation)}.
+\]
+Each order has size in $Y$ units:
+\[
+Q\sim\mathrm{LogNormal}(m,\sigma_r),\quad \sigma_r=1.2,\quad m=\ln(\bar Q)-\tfrac12\sigma_r^2,
+\]
+with
+\[
+\bar Q\sim\mathrm{Uniform}(19,21)\ \text{(per simulation)}.
+\]
+Order side is independent:
+\[
+\Pr(\text{buy }X)=0.5,\quad \Pr(\text{sell }X)=0.5.
+\]
+So retail flow is uninformed, random-direction flow with heavy-tailed sizes.
+
+\section{Order Routing Across Two AMMs}
+Router tries to maximize trader execution quality by splitting each order.
+For exactly two AMMs, split formulas are analytical.
+
+\subsection*{Buy order: trader spends total $Q_y$ in token $Y$}
+Let ask-side gammas $\gamma_1,\gamma_2$, reserves $(x_i,y_i)$, and
+\[
+A_i=\sqrt{x_i\gamma_i y_i},\quad r=\frac{A_1}{A_2}.
+\]
+Optimal split to AMM 1:
+\[
+Q_{y,1}^\star = \frac{r(y_2+\gamma_2 Q_y)-y_1}{\gamma_1+r\gamma_2},
+\]
+then clamped to $[0,Q_y]$ and $Q_{y,2}^\star=Q_y-Q_{y,1}^\star$.
+
+\subsection*{Sell order: sampled in $Y$, converted to $X$ notional}
+The code samples sell size in $Y$ terms and converts:
+\[
+Q_x = \frac{Q_y}{S}.
+\]
+Using bid-side gammas:
+\[
+B_i=\sqrt{y_i\gamma_i x_i},\quad r=\frac{B_1}{B_2},
+\]
+\[
+Q_{x,1}^\star=\frac{r(x_2+\gamma_2 Q_x)-x_1}{\gamma_1+r\gamma_2},
+\]
+clamped to $[0,Q_x]$, with $Q_{x,2}^\star=Q_x-Q_{x,1}^\star$.
+
+\section{Edge Metric}
+Edge is computed trade-by-trade using fair price $S$ at execution time.
+For a trade with fair price $S$:
+\[
+\text{edge}=
+\begin{cases}
+q_x S - q_y, & \text{if AMM buys }X,\\
+q_y - q_x S, & \text{if AMM sells }X.
+\end{cases}
+\]
+Interpretation:
+\begin{itemize}
+\item positive edge means AMM traded at favorable terms versus fair value;
+\item negative edge means AMM gave away value.
+\end{itemize}
+Arbitrage impact is entered as negative arbitrageur profit:
+\[
+\Delta \text{edge}_{\text{arb}} = -\Pi_{\text{arb}}.
+\]
+Simulation edge is the sum over all trades.
+
+\section{PnL Valuation}
+Initial value at $t=0$:
+\[
+V_0 = x_0 S_0 + y_0.
+\]
+Final value at $T$:
+\[
+V_T = x_T S_T + y_T + F^x_T S_T + F^y_T.
+\]
+Reported PnL:
+\[
+\mathrm{PnL}=V_T-V_0.
+\]
+Because fees are off-reserve, PnL includes both reserve inventory and fee buckets.
+
+\section{Match Winner and CLI Score}
+Per simulation, submission wins if
+\[
+\text{edge}_s > \text{edge}_n.
+\]
+CLI output score is average submission edge across all simulations.
+
+\section{Worked One-Trade Example (AMM Buys $X$)}
+Suppose before trade:
+\[
+x=100,\quad y=10{,}000,\quad k=1{,}000{,}000,\quad f^{\mathrm{bid}}=0.003,\quad q_x=1.
+\]
+Then $\gamma=0.997$, net reserve input $\Delta x_{\text{net}}=0.997$, so
+\[
+x'=100.997,\quad y'=\frac{1{,}000{,}000}{100.997}\approx 9{,}901.284.
+\]
+Hence trader receives
+\[
+\Delta y_{\text{out}}=10{,}000-9{,}901.284\approx 98.716.
+\]
+Fee bucket update:
+\[
+F^x \leftarrow F^x + 0.003.
+\]
+If fair price at that instant is $S=100$, trade edge is
+\[
+q_x S-\Delta y_{\text{out}}\approx 100-98.716=1.284.
+\]
+
+\section{Baseline Parameter Table}
+\begin{center}
+\begin{tabular}{ll}
+\toprule
+Parameter & Value / Distribution \\
+\midrule
+$T$ & $10{,}000$ \\
+$S_0$ & $100$ \\
+$(x_0,y_0)$ & $(100,\,10{,}000)$ \\
+$\mu$ & $0$ \\
+$\Delta t$ & $1$ \\
+$\sigma$ & $\mathrm{Uniform}(0.000882,0.001008)$ \\
+$\lambda$ & $\mathrm{Uniform}(0.6,1.0)$ \\
+$\bar Q$ & $\mathrm{Uniform}(19,21)$ \\
+$\sigma_r$ & $1.2$ \\
+$\Pr(\text{buy }X)$ & $0.5$ \\
+Normalizer fee & $30$ bps (bid and ask) \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\section{Implementation Notes}
+\begin{itemize}
+\item Strategy can change fees after each trade (both bid and ask).
+\item If a strategy callback errors, simulator keeps previous fee quote.
+\item Routing code path for this challenge is exactly two AMMs, where closed-form split is used.
+\item Random seeds are set per simulation, with different seeds for fair-price process and retail flow.
+\end{itemize}
+
+\end{document}
